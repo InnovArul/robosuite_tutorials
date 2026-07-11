@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robosuite-tutorials"
+version = "0.1.0"
+description = "Getting started tutorials and examples for robosuite and TorchRL integration."
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "robosuite",
+    "robosuite_models",
+    "h5py",
+    "torchrl",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+]
+
+[tool.ruff]
+# Match standard formatting rules
+line-length = 88
+indent-width = 4
+target-version = "py310"
+
+[tool.ruff.lint]
+# Enable Pyflakes (F) and Pycodestyle (E, W) rules by default
+select = ["E", "F", "W", "I"]
+ignore = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.setuptools.packages.find]
+where = ["src"]
