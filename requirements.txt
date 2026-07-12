@@ -2,3 +2,5 @@ robosuite
 robosuite_models
 h5py
 torchrl
+numpy
+scipy
