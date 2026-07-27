@@ -41,10 +41,8 @@ class RandomShiftsAug(nn.Module):
         
         arange = arange.unsqueeze(0).repeat(h, 1) # Shape: (H, H)
         
-        # Base grid coordinates for height and width
-        grid_x = arange.unsqueeze(-1)
-        grid_y = arange.unsqueeze(0)
-        grid = torch.cat([grid_y, grid_x], dim=-1).unsqueeze(0).repeat(n, 1, 1, 1)
+        # Base grid coordinates (x, y) stacked along last dimension -> Shape: (1, H, H, 2)
+        grid = torch.stack([arange, arange.T], dim=-1).unsqueeze(0).repeat(n, 1, 1, 1)
 
         # 3. Generate random integer offset translations per batch item
         delta = torch.randint(
