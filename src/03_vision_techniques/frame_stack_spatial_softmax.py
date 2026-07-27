@@ -1,20 +1,22 @@
 import collections
-import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class RobosuitePixelWrapper(gym.Wrapper):
+class RobosuitePixelWrapper:
     """
-    Gymnasium wrapper for Robosuite that handles frame-stacking (k=3),
+    Wrapper for Robosuite that handles frame-stacking (k=3),
     channel-first conversion (CHW), OpenGL inversion, and proprioception integration.
     """
     def __init__(self, env, num_stack=3, camera_name="agentview_image"):
-        super().__init__(env)
+        self.env = env
         self.num_stack = num_stack
         self.camera_name = camera_name
         self.frame_buffer = collections.deque(maxlen=num_stack)
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
 
     def _process_frame(self, raw_img):
         # Fix OpenGL vertical flip and convert to CHW float32

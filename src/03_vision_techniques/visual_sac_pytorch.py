@@ -2,10 +2,47 @@ import torch, torch.nn as nn, torch.nn.functional as F
 from torch.distributions import Normal
 
 import copy
+import numpy as np
+import random
+
 
 # import spatial softmax and augmentation modules from other files
-from frame_stack_spatial_softmax import SpatialSoftmaxEncoder
+from frame_stack_spatial_softmax import SpatialSoftmaxEncoder, RobosuitePixelWrapper
 from random_translation_shift import RandomShiftsAug
+from robosuite_with_pixels import make_visual_env
+
+
+class ReplayBuffer:
+    """Stores transitions for off-policy visual RL."""
+    def __init__(self, capacity=1000):
+        self.capacity = capacity
+        self.buffer = []
+        self.idx = 0
+
+    def push(self, obs, action, reward, next_obs, done):
+        transition = (obs["pixels"], obs["proprio"], action, reward, next_obs["pixels"], next_obs["proprio"], done)
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(transition)
+        else:
+            self.buffer[self.idx] = transition
+        self.idx = (self.idx + 1) % self.capacity
+
+    def sample(self, batch_size):
+        batch = random.sample(self.buffer, batch_size)
+        pixels, proprio, actions, rewards, next_pixels, next_proprio, dones = zip(*batch)
+        return (
+            torch.stack(pixels),
+            torch.stack(proprio),
+            torch.tensor(np.array(actions), dtype=torch.float32),
+            torch.tensor(np.array(rewards), dtype=torch.float32).unsqueeze(-1),
+            torch.stack(next_pixels),
+            torch.stack(next_proprio),
+            torch.tensor(np.array(dones), dtype=torch.float32).unsqueeze(-1)
+        )
+
+    def __len__(self):
+        return len(self.buffer)
+
 
 class SquashedGaussianActor(nn.Module):
     """
@@ -99,6 +136,14 @@ class DrQv2SACAgent:
         self.critic_opt = torch.optim.Adam(self.critic.parameters(), lr=1e-4)
         self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=1e-4)
 
+    def select_action(self, obs, eval_mode=False):
+        with torch.no_grad():
+            pixels = obs["pixels"].unsqueeze(0).to(self.device)
+            proprio = obs["proprio"].unsqueeze(0).to(self.device)
+            z = self.encoder(pixels)
+            action, _ = self.actor(z, proprio)
+            return action.squeeze(0).cpu().numpy()
+        
     def update(self, batch, gamma=0.99, tau=0.01):
         """
         Update the SAC agent using a batch of transitions.
@@ -156,3 +201,38 @@ class DrQv2SACAgent:
             p_targ.data.copy_(tau * p.data + (1 - tau) * p_targ.data)
 
         return {"critic_loss": critic_loss.item(), "actor_loss": actor_loss.item()}
+
+
+if __name__ == "__main__":
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"=== Initializing Visual SAC Pipeline on Device: {device} ===")
+
+    env = make_visual_env(env_name="Lift", robot_name="Panda")
+    env = RobosuitePixelWrapper(env, num_stack=3, camera_name="agentview_image")
+    obs = env.reset()
+    proprio_dim = obs["proprio"].shape[0]
+
+    agent = DrQv2SACAgent(action_dim=env.action_dim, proprio_dim=proprio_dim, device=device)
+    buffer = ReplayBuffer(capacity=1000)
+
+    print("\n--- Phase 1: Collecting Initial Experience (Warmup) ---")
+    for step in range(100):
+        # Sample action from policy
+        action = agent.select_action(obs)
+        next_obs, reward, done, _ = env.step(action)
+        buffer.push(obs, action, reward, next_obs, done)
+        obs = next_obs if not done else env.reset()
+        if (step + 1) % 20 == 0:
+            print(f"Collected {step + 1}/100 warmup steps into Replay Buffer.")
+
+    print("\n--- Phase 2: Executing RL Gradient Update Steps ---")
+    batch_size = 32
+    for update_step in range(1, 6):
+        batch = buffer.sample(batch_size)
+        loss_dict = agent.update(batch)
+        c_loss, a_loss = loss_dict["critic_loss"], loss_dict["actor_loss"]
+        print(f"Update Step {update_step:02d} | Critic Loss: {c_loss:.4f} | Actor Loss: {a_loss:.4f}")
+
+    env.close()
+    print("\n✓ Pipeline Execution Completed Successfully!")
+
